@@ -1,0 +1,12 @@
+export CIRDB_DIR="/var/cir_db"
+export CIRDB_CACHE_DIR="/dev/shm/cir_db_cache"
+export CIRDB_ID_LENGTH="10"
+export CIRDB_DIR_INDEX_DEPTH="4"
+export CIRDB_TIME_OFFSET="-10800"
+export CIRDB_SYNC_EVERY="300"
+export CIRDB_PURGE_EVERY="86400"
+export CIRDB_PURGE_OLDER_THAN="7776000"
+export CIRDB_RRDTOOL_BINARY_PATH="/usr/bin/rrdtool"
+export CIRDB_API_URL="http://localhost:9666/api"
+export CIRDB_SERVICE_PORT="9666"
+
