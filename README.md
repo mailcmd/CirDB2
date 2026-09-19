@@ -44,31 +44,59 @@ In disk:
 In ram (/dev/shm):
 ```
     db
-    |_ metadata.dets
     |_ daily.dets
 
 ```
-Just the metadatas and daily data. They are the most frequently accessed data. It is needed also
-a system to push to disk ram data every n seconds. 
+Just the metadatas and daily data are in RAM disk. They are the most frequently accessed 
+data. It is needed also a system to push to disk ram data every n seconds. 
+
+### How it works?
+
+1. The first time CirDB init create the files in disk and then copy daily file to RAM disk. 
+2. The second and next times that CirDB init, look for daily disk file and daily cache file. 
+   If cache file does not exists, copy disk to cache and open cache.
+   If cache file exists, look last update of both files and copy the newest to disk or RAM 
+   as needed. Then open the cache file.
+2. When CirDB is running, you have open the daily cache file, the metadata disk file, and the 
+   period consolidated disk files. 
+3. Every N seconds CirDB copy the daily cache file to disk.
+4. Every M seconds CirDB purge the objects that has not updates from one time to now. 
 
 ### Files structs
 
-- <period>.dets format:
+- metadata.dets format:
 ```
 {
     obj_id, 
-    items_count, 
-    daily_every,
-    amount = div( 48*3600, daily_every ),
-    amount = div( 14*24*3600, 6*daily_every ),
-    amount = div( 56*24*3600, 24*daily_every ),
-    amount = div( 360*24*3600, 144*daily_every ),
-    [{type_of_data, label, max, min}, {...}, {...}],
+    daily_every, amount = div( 48*3600, daily_every ),
+    6*daily_every, amount = div( 14*24*3600, 6*daily_every ),
+    24*daily_every, amount = div( 56*24*3600, 24*daily_every ),
+    144*daily_every, amount = div( 360*24*3600, 144*daily_every ),
+    [{type_of_data, label, max, min}, {...}, {...}]
+}
+```
+
+- daily.dets format:
+
+```
+{
+    obj_id, 
     last_update_timestamp,
     array[{value_item_1, value_item_2, ...}, {...}]
 }
 ```
 
+- <period>.dets format:
+
+```
+{
+    obj_id, 
+    last_update_timestamp,
+    array[{value_item_1, value_item_2, ...}, {...}], # AVG
+    array[{value_item_1, value_item_2, ...}, {...}], # MAX
+    array[{value_item_1, value_item_2, ...}, {...}]  # MIN
+}
+```
 
 
 ## Installation

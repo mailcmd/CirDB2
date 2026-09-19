@@ -40,5 +40,4 @@ defmodule CirDB.Application do
   end
 
   defp port, do: Application.get_env(:cir_db, :service)[:port] || 9666
-  # defp ssl_port, do: Application.get_env(:cir_db, :ssl_port, 6443)
 end

@@ -8,13 +8,15 @@ defmodule CirDB do
   @external_resource "ENV.sh"
   @external_resource "CIRDB_ENV.sh"
 
-  @is_standalone (File.cwd! |> Path.dirname() |> Path.basename()) != "deps"
+  # Determine if CirDB is installed as module or as server
+  @is_server (File.cwd! |> Path.dirname() |> Path.basename()) != "deps"
 
   # ################################
   # ## ON COMPILE CHECK CONFIG FILE
   # ################################
   dest_dir = File.cwd! <> "/../../config/local/"
-  if not @is_standalone and not File.exists?("#{dest_dir}/cir_db.exs") do
+  if not File.exists?(dest_dir), do: File.mkdir_p(dest_dir)
+  if not @is_server and not File.exists?("#{dest_dir}/cir_db.exs") do
     IO.puts "[CirDB]: WARNING!!! We need to copy config.exs.example to config dir and rename it!!!!"
     IO.puts "[CirDB]: Coping config file to config/..."
     source_dir = File.cwd! <> "/config"
@@ -50,13 +52,12 @@ defmodule CirDB do
         }
 
         config
-          |> Map.put(:metadata_file, config[:dir] <> "/metadata.db")
-          |> Map.put(:daily_file, config[:dir] <> "/daily.db")
-          |> Map.put(:weekly_file, config[:dir] <> "/weekly.db")
-          |> Map.put(:monthly_file, config[:dir] <> "/monthly.db")
-          |> Map.put(:yearly_file, config[:dir] <> "/yearly.db")
-          |> Map.put(:metadata_cache_file, config[:cache_dir] <> "/metadata.db")
-          |> Map.put(:daily_cache_file, config[:cache_dir] <> "/daily.db")
+          |> Map.put(:daily_cache_file, String.to_charlist(config[:cache_dir] <> "/daily.db"))
+          |> Map.put(:metadata_file, String.to_charlist(config[:dir] <> "/metadata.db"))
+          |> Map.put(:daily_file, String.to_charlist(config[:dir] <> "/daily.db"))
+          |> Map.put(:weekly_file, String.to_charlist(config[:dir] <> "/weekly.db"))
+          |> Map.put(:monthly_file, String.to_charlist(config[:dir] <> "/monthly.db"))
+          |> Map.put(:yearly_file, String.to_charlist(config[:dir] <> "/yearly.db"))
       end, name: __MODULE__)
     end
     def get() do
@@ -69,11 +70,6 @@ defmodule CirDB do
       Agent.update(__MODULE__, fn config -> Map.put(config, key, value) end)
     end
   end
-
-  @nan_value <<1.0e-50::float>>
-  @bin_header_size 8
-  @bin_timestamp_size 4
-  @bin_item_data_size 8
 
   @types %{0 => :gauge, 1 => :counter32, 2 => :counter64}
 
@@ -131,13 +127,13 @@ defmodule CirDB do
     ## Init Config getter
     CirDB.Config.init()
 
-    if @is_standalone do
+    if @is_server do
       ## Create struct and Init cache
-      if not File.exists?(CirDB.Config.get(:dir)) do
+      if not File.exists?(CirDB.Config.get(:daily_file)) do
         create_struct()
       else
-        open_struct() 
-      end 
+        open_struct()
+      end
 
       ## launch sync process
       :timer.apply_after(CirDB.Config.get(:sync_every)*1000, __MODULE__, :do_sync, [])
@@ -178,18 +174,21 @@ defmodule CirDB do
   # Copy complete cache to db
   @spec sync() :: :ok
   def sync() do
-    :dets.sync(:metadata_cache_file)
-    File.cp_r!(CirDB.Config.get(:metadata_cache_file), CirDB.Config.get(:metadata_file), on_conflict: &overwrite_older/2)
     :dets.sync(:daily_cache_file)
-    File.cp_r!(CirDB.Config.get(:daily_cache_file), CirDB.Config.get(:daily_file), on_conflict: &overwrite_older/2)
+    File.cp!(CirDB.Config.get(:daily_cache_file), CirDB.Config.get(:daily_file), on_conflict: &overwrite_older/2)
   end
 
   # Remove files older than CirDB.Config.get(:purge_older_than)
   @spec purge() :: :ok
   def purge() do
-    now = now()
-    filter = :ets.fun2ms(fn {_, ts, _} when ts < 45454 -> true end)
-    :dets.select_delete(:da)
+    older_than = CirDB.Config.get(:purge_older_than)
+    filter = :ets.fun2ms(fn
+        {_, ts, _} when ts < older_than -> true
+    end)
+    :dets.select_delete(:daily, filter)
+    :dets.select_delete(:weekly, filter)
+    :dets.select_delete(:monthly, filter)
+    :dets.select_delete(:yearly, filter)
   end
 
   def initiated?() do
@@ -201,72 +200,96 @@ defmodule CirDB do
 
   # Create Object
   @spec create_object(object::object()) :: {:ok, id::String.t()} | {:error, reason::atom()}
-  def create_object(object), do:
-    create_object(object.id || random_id(), object)
+  def create_object(%Object{id: id} = object) when is_binary(id) do
+    daily_amount = div(48*3600, object.daily_period)
+    weekly_amount = div(14*24*3600, 6*object.daily_period)
+    monthly_amount = div(56*24*3600, 24*object.daily_period)
+    yearly_amount = div(360*24*3600, 144*object.daily_period)
+    
+    items = create_object_h(object.items)
+    
+    row = {
+      id,
+      object.daily_period, daily_amount,
+      6*object.daily_period, weekly_amount,
+      24*object.daily_period, monthly_amount,
+      144*object.daily_period, yearly_amount,
+      items
+    }
+    :dets.insert_new(:metadata, row)
+  end
+  defp create_object_h([]), do: []
+  defp create_object_h([ %Item{} = item | items ]) do
+    [{item.type, item.label, item.max, item.min}] ++ create_object_h(items)
+  end
 
-  @spec create_object(id::any(), object::object()) :: {:ok, id::String.t()} | {:error, reason::atom()}
-  def create_object(id, object) when is_integer(id), do: create_object(normalize_id(id), object)
-  def create_object(id, %Object{items: items} = object) when is_binary(id) do
-    id = byte_size(id) != CirDB.Config.get(:id_length) && normalize_id(id) || id
-    filename = build_inf_filename(id)
-    if File.exists?(filename) do
-      {:error, "Object already exists!"}
-    else
-      daily_amount = div(48*3600, object.daily_period)
-      weekly_amount = div(14*24*3600, 6*object.daily_period)
-      monthly_amount = div(56*24*3600, 24*object.daily_period)
-      yearly_amount = div(360*24*3600, 144*object.daily_period)
+  @spec update(id::any, vals::list()) :: :ok | {:error, reason::String.t()}
+  def update(id, vals) when is_list(vals), do:
+    update(id, now(), vals)
+  def update({:error, _} = error, _, _), do: error
+  def update(id, ts, vals) do
+    object_info = object_info(id)
+    timestamp = timestamp_align(ts, object_info[:daily].period)
 
-      bin =
-        <<length(items)::8, 0, 0, 0>> <>
-        <<object.daily_period::unsigned-size(32)>> <>
-        <<daily_amount::unsigned-size(32)>> <>
-        <<6*object.daily_period::unsigned-size(32)>> <>
-        <<weekly_amount::unsigned-size(32)>> <>
-        <<24*object.daily_period::unsigned-size(32)>> <>
-        <<monthly_amount::unsigned-size(32)>> <>
-        <<144*object.daily_period::unsigned-size(32)>> <>
-        <<yearly_amount::unsigned-size(32)>> <>
-        create_object_h(items)
+    case object_info do
+      {:error, _} = error ->
+        error
 
-      # create inf file
-      {:ok, fd} = :file.open(filename, :write)
-      :file.write(fd, bin)
-      :file.close(fd)
+      %{last_update: last_update} when last_update > timestamp ->
+        {:error, "Timestamp equal or older than last_update"}
 
-      # create bin files
-      init_bin_file(id, :daily, length(items), daily_amount)
-      init_bin_file(id, :weekly, length(items), weekly_amount)
-      init_bin_file(id, :monthly, length(items), monthly_amount)
-      init_bin_file(id, :yearly, length(items), yearly_amount)
+      %{items_count: items_count} when items_count == length(vals) ->
+        index = get_position(ts, object_info, :daily)
+        data = object_datas(:daily, id)
+        data = :array.set(index, vals, data)
+        :dets.insert(:daily_cache, {id, timestamp, data})
 
-      copy_to_cache(id)
-
-      {:ok, id}
+        # Hit the consolidation processes
+        spawn(__MODULE__, :consolidate_object, [object_info, timestamp])
+        :ok
+      _ ->
+        {:error, "Values count does not match with items count"}
     end
   end
-  defp create_object_h([]), do: <<>>
-  defp create_object_h([ %Item{} = item | items ]) do
-    <<item.type::8, String.length(item.label)::8>> <> item.label <>
-    <<item.max::float>> <>
-    <<item.min::float>> <>
-    create_object_h(items)
-  end
-  defp create_object_h([ item | items ]), do: create_object_h([ struct(Item, item )| items ])
 
-  # Remove object
-  @spec remove_object(id :: String.t()) :: :ok | {:error, reason::atom()}
-  def remove_object(id) do
-    with _ <- id |> build_inf_cache_filename() |> File.rm(),
-         _ <- id |> build_bin_cache_filename() |> File.rm(),
-         :ok <- id |> build_inf_filename() |> File.rm(),
-         :ok <- id |> build_bin_filename(:daily) |> File.rm(),
-         _ <- id |> build_bin_filename(:weekly) |> File.rm(),
-         _ <- id |> build_bin_filename(:monthly) |> File.rm(),
-         _ <- id |> build_bin_filename(:yearly) |> File.rm() do
-      :ok
-    else
-      error -> error
+  @spec object_info(id :: String.t()) :: object_info::map() | {:error, msg::String.t() | tuple()}
+  def object_info(id) do
+    case :dets.lookup(:metadata, id) do
+      [] ->
+        {:error, {"Object does not exists", -2}}
+      [{_,
+        daily_period, daily_amount,
+        weekly_period, weekly_amount,
+        monthly_period, monthly_amount,
+        yearly_period, yearly_amount,
+        items
+      }] ->
+        %{
+          id: id,
+          items_count: length(items),
+          items: items,
+          last_update: object_last_update(id),
+          daily: %{
+            period: daily_period,
+            amount: daily_amount
+          },
+          daily_cache: %{
+            period: daily_period,
+            amount: daily_amount
+          },
+          weekly: %{
+            period: weekly_period,
+            amount: weekly_amount
+          },
+          monthly: %{
+            period: monthly_period,
+            amount: monthly_amount
+          },
+          yearly: %{
+            period: yearly_period,
+            amount: yearly_amount
+          }
+        }
     end
   end
 
@@ -279,228 +302,38 @@ defmodule CirDB do
   end
 
   def consolidate_object_h(object_info, scope) do
-    datas = fetch(object_info.id, %FetchConfig{scope: "#{object_info[scope].period}secs"})
-    {timestamp, _} = List.last(datas)
-
-    filename = build_bin_filename(object_info.id, scope)
-    {:ok, fd} = :file.open(filename, [:read, :write, :binary, :raw])
-    offset = pointer_offset(object_info, scope)
-
-    # AVG
-    bindata = datas
-      |> agg_avg()
-      |> vals_to_bin()
-    {_, _, _, agg_pos} = scope_params(object_info, scope, :avg)
-    pos = agg_pos + offset
-    :file.pwrite(fd, pos, <<timestamp::unsigned-size(32)>> <> bindata)
-
-    # MAX
-    bindata = datas
-      |> agg_max()
-      |> vals_to_bin()
-    {_, _, _, agg_pos} = scope_params(object_info, scope, :max)
-    pos = agg_pos + offset
-    :file.pwrite(fd, pos, <<timestamp::unsigned-size(32)>> <> bindata)
-
-    # MIN
-    bindata = datas
-      |> agg_min()
-      |> vals_to_bin()
-    {_, _, _, agg_pos} = scope_params(object_info, scope, :min)
-    pos = agg_pos + offset
-    :file.pwrite(fd, pos, <<timestamp::unsigned-size(32)>> <> bindata)
-
-    :file.pwrite(fd, 0, <<pointer_next(object_info, scope)::unsigned-size(32)>>)
-    :file.close(fd)
-
-  end
-
-  # Object info
-  @spec object_info(id :: String.t()) :: object_info::map() | {:error, msg::String.t() | tuple()}
-  def object_info(id) do
-    if not object_exists?(id) do
-      {:error, {"Object does not exists", -2}}
-    else
-      inf_filename = build_inf_cache_filename(id)
-      # if it is not in cache is copied to cache
-      if not File.exists?(inf_filename), do: copy_to_cache(id)
-      data = File.read!(inf_filename)
-
-      <<
-        _::32,
-        daily_period::unsigned-size(32),
-        daily_amount::unsigned-size(32),
-        weekly_period::unsigned-size(32),
-        weekly_amount::unsigned-size(32),
-        monthly_period::unsigned-size(32),
-        monthly_amount::unsigned-size(32),
-        yearly_period::unsigned-size(32),
-        yearly_amount::unsigned-size(32),
-        data::binary
-      >> = data
-
-      items = object_info_h(data)
-      items_count = length(items)
-      {pointer, last_update} = object_header(id)
-
-      %{
-        id: id,
-        last_update: last_update,
-        pointer: pointer,
-        cache_filename: build_bin_cache_filename(id),
-        daily: %{
-          filename: build_bin_filename(id, :daily),
-          period: daily_period,
-          amount: daily_amount,
-          block_size: daily_amount * (@bin_timestamp_size + items_count * @bin_item_data_size),
-        },
-        weekly: %{
-          filename: build_bin_filename(id, :weekly),
-          period: weekly_period,
-          amount: weekly_amount,
-          block_size: weekly_amount * (@bin_timestamp_size + items_count * @bin_item_data_size),
-        },
-        monthly: %{
-          filename: build_bin_filename(id, :monthly),
-          period: monthly_period,
-          amount: monthly_amount,
-          block_size: monthly_amount * (@bin_timestamp_size + items_count * @bin_item_data_size),
-        },
-        yearly: %{
-          filename: build_bin_filename(id, :yearly),
-          period: yearly_period,
-          amount: yearly_amount,
-          block_size: yearly_amount * (@bin_timestamp_size + items_count * @bin_item_data_size),
-        },
-        items_count: items_count,
-        items: items
-      }
-    end
-  end
-  defp object_info_h(data, items \\ [])
-  defp object_info_h(<<>>, items), do: items
-  defp object_info_h(data, items) do
-    <<
-      type::8,
-      label_len::8, label::binary-size(label_len),
-      max::float,
-      min::float,
-      data::binary
-    >> = data
-    object_info_h(data, items ++ [ %Item{
-      type: type,
-      label: label,
-      max: max,
-      min: min
-    }])
+    last_datas = fetch(object_info.id, %FetchConfig{scope: "#{object_info[scope].period}secs"})
+    {timestamp, _} = List.last(last_datas)
+    avg_data = agg_avg(last_datas)
+    max_data = agg_max(last_datas)
+    min_data = agg_min(last_datas)
+    index = get_position(timestamp, object_info, scope)
+    {avg_datas, max_datas, min_datas} = object_datas(scope, object_info.id)
+    avg_datas = :array.set(index, avg_data, avg_datas) 
+    max_datas = :array.set(index, max_data, max_datas)
+    min_datas = :array.set(index, min_data, min_datas)
+    :dets.insert(scope, {object_info.id, timestamp, avg_datas, max_datas, min_datas})
   end
 
   # Last update timestamp
   @spec object_last_update(id::String.t()) :: timestamp::integer()
-  def object_last_update(id), do: object_header(id, :daily) |> elem(1)
-
-  @spec object_header(id::String.t(), scope::atom()) :: timestamp::integer()
-  def object_header(id, scope \\ :daily)
-  def object_header(id, scope) do
-  try do    
-    file = open_object(id, scope)
-    {:ok, <<pointer::unsigned-size(32), items_count::unsigned-size(32)>>} = :file.read(file, @bin_header_size)
+  def object_last_update(id) do
+    case :dets.lookup(:daily_cache, id) do
+      [] -> -1
+      [{_, ts, _}] -> ts
+    end
+  end
   
-    size = :file.read_file_info(file) |> elem(1) |> elem(1)
-    amount = div(size - 8, @bin_timestamp_size + @bin_item_data_size * items_count)
-    pointer_prev =
-      case pointer - 1 do
-        ptr when ptr < 0 -> amount - 1
-        ptr -> ptr
-      end
-    {:ok, <<ts::unsigned-size(32)>>} = :file.pread(file, @bin_header_size + pointer_prev * (@bin_timestamp_size + @bin_item_data_size * items_count), 4)
-    close_object(file)
-    {pointer, ts}
-  rescue 
-    e -> 
-      IO.inspect {id, scope}
-      reraise e, __STACKTRACE__
-  end
-  end
-
-  # Object exists?
-  @spec object_exists?(id::any()) :: exists::boolean()
-  def object_exists?(id) do
-    filename = 
-      id 
-      |> normalize_id() 
-      |> build_bin_filename(:daily) 
-      
-    real_file = 
-      case File.stat(filename) do
-        {:error, _} -> false
-        {:ok, %File.Stat{size: size}} when size == 0 -> false
-        _ -> true
-      end    
-    
-    cache_filename = 
-      id 
-      |> normalize_id() 
-      |> build_bin_cache_filename()
-      
-    cache_file = 
-      case File.stat(cache_filename) do
-        {:error, _} -> false
-        {:ok, %File.Stat{size: size}} when size == 0 -> false
-        _ -> true
-      end        
-
-    real_file and cache_file
-  end
-
-  ################################################################################################
-  ## Items Management
-  ################################################################################################
-
-  # Update items
-  @spec update(id::any, vals::list()) :: :ok | {:error, reason::String.t()}
-  def update(id, vals) when is_list(vals), do:
-    update(id, now(), vals)
-  def update(id, ts, vals) when is_integer(id) or is_binary(id), do:
-    id |> normalize_id() |> object_info() |> update(ts, vals)
-  # def update(id, ts, vals) when is_binary(id) do
-  #   id |> normalize_id() |> object_info() |> update(ts, vals)
-  # end
-  def update({:error, _} = error, _, _), do: error
-  def update(object_info, ts, vals) do
-    timestamp = timestamp_align(ts, object_info.daily.period)
-
-    case object_info do
-      {:error, _} = error ->
-        error
-
-      %{last_update: last_update} when last_update > timestamp ->
-        {:error, "Timestamp equal or older than last_update"}
-
-      %{items_count: items_count} = object when items_count == length(vals) ->
-        # get position in file
-        pos = @bin_header_size +
-          if timestamp == object.last_update do
-            pointer_prev_offset(object, :daily)
-          else
-            pointer_offset(object, :daily)
-          end
-
-        bindata = vals_to_bin(vals)
-
-        {:ok, fd} = :file.open(object.cache_filename, [:read, :write, :binary, :raw])
-
-        # write data to position
-        :file.pwrite(fd, pos, <<ts::unsigned-size(32)>> <> bindata)
-        if timestamp > object.last_update, do:
-          :file.pwrite(fd, 0, <<pointer_next(object, :daily)::unsigned-size(32)>>)
-        :file.close(fd)
-
-        spawn(__MODULE__, :consolidate_object, [object_info, timestamp])
-        # consolidate_object(object_info, timestamp)
-        :ok
-      _ ->
-        {:error, "Values count does not match with items count"}
+  def object_datas(:daily, id), do: object_datas(:daily_cache, id)
+  def object_datas(scope, id) do
+    case :dets.lookup(scope, id) do
+      [] ->
+        info = object_info(id)
+        :array.new(info[scope].amount)
+      [{_, _, datas}] ->
+        datas
+      [{_, _, avg_datas, max_datas, min_datas}] ->
+        {avg_datas, max_datas, min_datas}
     end
   end
 
@@ -510,59 +343,52 @@ defmodule CirDB do
   """
   @spec fetch_raw(id::any(), config::fetch_config()) :: list(tuple())
   def fetch_raw(id, %FetchConfig{} = config \\ %FetchConfig{}) do
-    id = normalize_id(id)
     case object_info(id) do
       {:error, _} = error ->
         error
 
-      %{items: _items} = object ->
+      %{items: _items} = object_info ->
         {ts_start, ts_end, scope} = parse_fetch_config(config)
-        {period, _amount, _block_size, block_position} = scope_params(object, scope, config.aggregate)
-
-        pointer = pointer(object, scope)
-        pointer_position = block_position + pointer_next_offset(object, scope)
-        data_unit_size = data_unit_size(object)
-
-        file = open_object(id, scope)
-
-        bindata =
-          (:file.pread(
-            file,
-            pointer_position,
-            (object[scope].amount - (pointer + 1)) * data_unit_size
-          ) |> elem(1)) <> (:file.pread(
-            file,
-            block_position, pointer * data_unit_size) |> elem(1))
-
-        :file.close(file)
-
+        period = object_info[scope].period
         ts_start = timestamp_align(ts_start, period) - period
         ts_end = timestamp_align(ts_end, period)
         timestamps = ts_start..ts_end//period |> Enum.into([])
+        
+        index_start = get_position(ts_start, object_info, scope)
+        index_end = get_position(ts_end, object_info, scope)
 
-        datas = bindata
-          |> :binary.bin_to_list()
-          |> Stream.chunk_every(data_unit_size)
-          |> Stream.map(fn list ->
-            [ts | vals] = list |> :binary.list_to_bin() |> extract_items_data()
-            tsa = timestamp_align(ts, period)
-            {tsa, {ts, vals}}
-          end)
-          |> Stream.filter(fn {tsa, _} ->
-            tsa >= ts_start and tsa <= ts_end
-          end)
-          |> Enum.into(%{})
-
-        result = timestamps
-          |> Enum.map(fn ts ->
+        data = object_datas(scope, id)
+        result =
+          timestamps 
+          |> Enum.zip(
+            if index_start < index_end do
+              :array.foldl(fn
+                (index, item, list) when index >= index_start and index <= index_end ->
+                  [item | list]
+                (_, _, list) ->
+                  list
+              end, [], data)
+              |> Enum.reverse()
+            else
+              {list_start, list_end} =
+                :array.foldl(fn
+                  (index, item, {list1, list2}) when index >= index_start ->
+                    {[item | list1], list2}
+                  (index, item, {list1, list2}) when index <= index_end ->
+                    {list1, [item | list2]}
+                end, {[], []}, data)
+              list_start = Enum.reverse(list_start)
+              list_end = Enum.reverse(list_end)
+              (list_start ++ list_end) 
+            end
+          )
+          |> Enum.map(fn {ts, vals} ->
             nts = config.time_as_string && "#{DateTime.from_unix!(ts)}" || ts
-            datas[ts] == nil
-              && {nts, {ts, (for _ <- 1..object.items_count, do: nil)}}
-              || {nts, datas[ts]}
+            {nts, vals}
           end)
 
         if config.first_row_labels do
-          [ {"timestamps_aligned", {"timestamps", Enum.map(object.items, &(&1.label))}} | result ]
+          [ {"timestamps_aligned", Enum.map(object_info.items, &(&1.label))} | result ]
         else
           result
         end
@@ -578,18 +404,17 @@ defmodule CirDB do
   """
   @spec fetch(id::any(), config::fetch_config()) :: list(tuple())
   def fetch(id, %FetchConfig{} = config \\ %FetchConfig{}) do
-    id = normalize_id(id)
     case fetch_raw(id, %{config | first_row_labels: false}) do
       {:error, _} = error ->
         error
 
       datas ->
-        object = object_info(id)
+        object_info = object_info(id)
         # items_types will be all :gauge if scope is not :daily
         items_types =
           case parse_fetch_config(config) do
-            {_, _, :daily} -> Enum.map(object.items, &({@types[&1.type], &1.min, &1.max}))
-            _ -> Enum.map(object.items, &({:gauge, &1.min, &1.max}))
+            {_, _, :daily} -> Enum.map(object_info.items, &({@types[&1.type], &1.min, &1.max}))
+            _ -> Enum.map(object_info.items, &({:gauge, &1.min, &1.max}))
           end
 
         result = datas
@@ -604,7 +429,7 @@ defmodule CirDB do
 
 
         if config.first_row_labels do
-          [ {"timestamps", Enum.map(object.items, &(&1.label))} | result ]
+          [ {"timestamps", Enum.map(object_info.items, &(&1.label))} | result ]
         else
           result
         end
@@ -621,23 +446,23 @@ defmodule CirDB do
 
   def fix_missing_data(datas, false), do: datas
   def fix_missing_data([d1, d2], _), do: [d1, d2]
-  def fix_missing_data([{_, {ts1,vs1}} = d1, {tas2, {_,vs2}} = d2, {_, {ts3,vs3}} = d3 | datas], fix) do
+  def fix_missing_data([{ts1, vs1} = d1, {ts2, vs2} = d2, {ts3,vs3} = d3 | datas], fix) do
     d2 =
       if not has_nils(vs1) and has_nils(vs2) and not has_nils(vs3) do
-        {tas2, {div(ts3+ts1, 2), middle_point(vs1, vs3)}}
+        {ts2, {div(ts3+ts1, 2), middle_point(vs1, vs3)}}
       else
         d2
       end
     [ d1 | fix_missing_data([d2, d3 | datas], fix) ]
   end
 
-  defp fetch_h([{_, {ts1, vals1}}, {tsa2, {ts2, vals2}}], items_types), do:
-    [ {tsa2, fetch_process_vals_h(vals1, vals2, ts2 - ts1, items_types)} ]
-  defp fetch_h([{_, {ts1, vals1}}, {tsa2, {ts2, vals2}} | datas], items_types) do
+  defp fetch_h([{ts1, vals1}, {ts2, vals2}], items_types), do:
+    [ {ts2, fetch_process_vals_h(vals1, vals2, ts2 - ts1, items_types)} ]
+  defp fetch_h([{ts1, vals1}, {ts2, vals2} | datas], items_types) do
     processed_vals = fetch_process_vals_h(vals1, vals2, ts2 - ts1, items_types)
-    [ {tsa2, processed_vals} ]
+    [ {ts2, processed_vals} ]
     ++
-    fetch_h([{tsa2, {ts2, vals2}} | datas], items_types)
+    fetch_h([{ts2, vals2} | datas], items_types)
   end
 
   defp fetch_process_vals_h([], [], _, []), do: []
@@ -678,77 +503,9 @@ defmodule CirDB do
   ## Not helpers private functions
   ################################################################################################
 
-  # extract timestamp and values from bindatas and return a list
-  defp extract_items_data(bindata) do
-    <<timestamp::unsigned-size(32), bindata::binary>> = bindata
-    [ timestamp | extract_items_data_h(bindata)]
-  end
-  def extract_items_data_h(<<>>), do: []
-  def extract_items_data_h(bindata) do
-    <<f::float, bindata::binary>> = bindata
-    [ (if <<f::float>> == @nan_value, do: nil, else: f) ] ++ extract_items_data_h(bindata)
-  end
 
-  # calculate the size of a data unit (ts + values)
-  defp data_unit_size(object) do
-    @bin_timestamp_size + @bin_item_data_size * object.items_count
-  end
-
-  # analize object and scope and return some useful datas:
-  #    {period, amount, block_size, block_position}
-  #       ^       ^          ^            ^
-  #       |       |          |            |
-  #     period   amount   size in      absolute position in
-  #   of scope  of datas  bytes of     file of the first data of
-  #            that this  amount need   the block
-  #          scope store
-  def scope_params(object, scope, agg) do
-    {period, amount, block_size} =
-      {object[scope].period, object[scope].amount, object[scope].block_size}
-    block_position = @bin_header_size + block_size * (scope == :daily && 0 || agg_offset(agg))
-    {period, amount, block_size, block_position}
-  end
-
-  # get the pointer value for scope
-  def pointer(object, scope) do
-    object_header(object.id, scope) |> elem(0)
-  end
-
-  # get the next pointer value for scope
-  def pointer_next(object, scope) do
-    amount = object[scope].amount
-    case pointer(object, scope) + 1 do
-      pointer when pointer >= amount ->
-        pointer - amount
-      pointer ->
-        pointer
-    end
-  end
-
-  # get the prev pointer value for scope
-  def pointer_prev(object, scope) do
-    case pointer(object, scope) - 1 do
-      pointer when pointer < 0 ->
-        object[scope].amount + pointer
-      pointer ->
-        pointer
-    end
-  end
-
-  # calculate the offset inside a block of datas for the current value of the pointer
-  defp pointer_offset(object, scope) do
-    pointer(object, scope) * data_unit_size(object)
-  end
-
-  # calculate the offset inside a block of datas for the next value of the pointer
-  defp pointer_next_offset(object, scope) do
-    pointer_next(object, scope) * data_unit_size(object)
-  end
-
-  # calculate the offset inside a block of datas for the prev value of the pointer
-  defp pointer_prev_offset(object, scope) do
-    pointer_prev(object, scope) * data_unit_size(object)
-  end
+  def get_position(ts, object_info, scope), do:
+    div(rem(ts, object_info[scope].amount * object_info[scope].period), object_info[scope].period)
 
   # align a timestamp to a period step
   def timestamp_align(ts, period) do
@@ -794,55 +551,33 @@ defmodule CirDB do
     end
   end
 
-  # really? do you need some explaination for this?
+  # really? do you need some explanation for this?
   def now() do
     System.os_time(:second) + CirDB.Config.get(:time_offset)
   end
 
-  #
-  defp init_bin_file(id, scope, items_count, amount) do
-    {:ok, fd} = id |> build_bin_filename(scope) |> :file.open(:write)
-    empty_data = <<0::32>> <> String.duplicate(@nan_value, items_count)
-    nan_datas =
-        # header (ptr + items_count)
-        <<0::32>> <> <<items_count::unsigned-size(32)>> <>
-        # <amount> nan's
-        String.duplicate(empty_data, amount * ((scope != :daily) && 3 || 1))
-    :file.write(fd, nan_datas)
-    :file.close(fd)
-  end
-
   # Just if it is the first time it is opened
   defp create_struct() do
-    File.mkdir_p!(CirDB.Config.get(:cache_dir))
-    :dets.open_file(:metadata_cache, CirDB.Config.get(:metadata_cache_file))
-    :dets.open_file(:daily_cache, CirDB.Config.get(:daily_cache_file))
     File.mkdir_p!(CirDB.Config.get(:dir))
+    File.mkdir_p!(CirDB.Config.get(:cache_dir))
+    :dets.open_file(:daily, file: CirDB.Config.get(:daily_file))
+    :dets.close(:daily)
+    :dets.open_file(:metadata, file: CirDB.Config.get(:metadata_file))
     :dets.open_file(:weekly, file: CirDB.Config.get(:weekly_file))
     :dets.open_file(:monthly, file: CirDB.Config.get(:monthly_file))
     :dets.open_file(:yearly, file: CirDB.Config.get(:yearly_file))
+    File.cp!(CirDB.Config.get(:daily_file), CirDB.Config.get(:daily_cache_file), on_conflict: &overwrite_older/2)
+    :dets.open_file(:daily_cache, file: CirDB.Config.get(:daily_cache_file))
   end
 
-  # If struct exists    
+  # If struct exists
   defp open_struct() do
-    File.cp_r!(CirDB.Config.get(:metadata_file), CirDB.Config.get(:metadata_cache_file), on_conflict: &overwrite_older/2)
-    File.cp_r!(CirDB.Config.get(:daily_file), CirDB.Config.get(:daily_cache_file), on_conflict: &overwrite_older/2)
-    :dets.open_file(:metadata_cache, CirDB.Config.get(:metadata_cache_file))
-    :dets.open_file(:daily_cache, CirDB.Config.get(:daily_cache_file))
+    File.cp!(CirDB.Config.get(:daily_file), CirDB.Config.get(:daily_cache_file), on_conflict: &overwrite_older/2)
+    :dets.open_file(:daily_cache, file: CirDB.Config.get(:daily_cache_file))
+    :dets.open_file(:metadata, file: CirDB.Config.get(:metadata_file))
     :dets.open_file(:weekly, file: CirDB.Config.get(:weekly_file))
     :dets.open_file(:monthly, file: CirDB.Config.get(:monthly_file))
     :dets.open_file(:yearly, file: CirDB.Config.get(:yearly_file))
-  end
-
-  # Copy complete db to cache
-  defp copy_to_cache(id) do
-    metadata_filename = build_inf_filename(id)
-    metadata_cache_filename = build_inf_cache_filename(id)
-    File.cp(metadata_filename, metadata_cache_filename, on_conflict: &overwrite_older/2)
-
-    daily_filename = build_bin_filename(id, :daily)
-    daily_cache_filename = build_bin_cache_filename(id)
-    File.cp(daily_filename, daily_cache_filename, on_conflict: &overwrite_older/2)
   end
 
   defp overwrite_older(source, destination) do
@@ -856,17 +591,10 @@ defmodule CirDB do
     s_mtime > d_mtime
   end
 
-  def normalize_id(id) when is_integer(id), do: to_string(id)
-  def normalize_id(id), do: id
-
-  defp agg_offset(:avg), do: 0
-  defp agg_offset(:max), do: 1
-  defp agg_offset(:min), do: 2
-
   def agg_avg(vals, accum \\ [])
-  def agg_avg([], accum), do: Enum.map(accum, fn 
+  def agg_avg([], accum), do: Enum.map(accum, fn
     [] -> 0
-    l -> :lists.sum(l)/length(l) 
+    l -> :lists.sum(l)/length(l)
   end)
   def agg_avg([ {_, vals} | datas], []), do: agg_avg(datas, Enum.map(vals, &([&1])))
   def agg_avg([ {_, vals} | datas], accum) do
@@ -874,9 +602,9 @@ defmodule CirDB do
   end
 
   defp agg_max(vals, accum \\ [])
-  defp agg_max([], accum), do: Enum.map(accum, fn 
+  defp agg_max([], accum), do: Enum.map(accum, fn
     [] -> 0
-    l -> :lists.max(l) 
+    l -> :lists.max(l)
   end)
   defp agg_max([ {_, vals} | datas], []), do: agg_max(datas, Enum.map(vals, &([&1])))
   defp agg_max([ {_, vals} | datas], accum) do
@@ -884,9 +612,9 @@ defmodule CirDB do
   end
 
   defp agg_min(vals, accum \\ [])
-  defp agg_min([], accum), do: Enum.map(accum, fn 
+  defp agg_min([], accum), do: Enum.map(accum, fn
     [] -> 0
-    l -> :lists.min(l)     
+    l -> :lists.min(l)
   end)
   defp agg_min([ {_, vals} | datas], []), do: agg_min(datas, Enum.map(vals, &([&1])))
   defp agg_min([ {_, vals} | datas], accum) do
@@ -900,13 +628,6 @@ defmodule CirDB do
       (nil,b) -> b
       (a,b) -> [a | b]
     end, list, list_of_list)
-  end
-
-  defp vals_to_bin(vals) do
-    Enum.reduce(vals, <<>>, fn
-      nil,a -> a ++ [@nan_value]
-      v,a -> a ++ [v]
-    end)
   end
 
 end
