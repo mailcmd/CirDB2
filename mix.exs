@@ -22,8 +22,8 @@ defmodule CirDB.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps(:service) do
     [
-      {:plug_cowboy, "~> 2.7.4"},
-      {:jason, "~> 1.4"}
+      {:plug_cowboy, "~> 2.9.0"},
+      {:jason, "~> 1.4.5"}
     ]
   end
   defp deps(:client) do
