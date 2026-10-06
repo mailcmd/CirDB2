@@ -199,9 +199,8 @@ defmodule CirDB do
 
   # Create Object
   @spec create_object(object::object()) :: {:ok, id::String.t()} | {:error, reason::atom()}
-  def create_object(%Object{id: id} = object) when not is_binary(id), 
-    do: create_object(%{object | id: to_string(id)})
   def create_object(%Object{id: id} = object) do
+    id = to_string(id)
     daily_amount = div(48*3600, object.daily_period)
     weekly_amount = div(14*24*3600, 6*object.daily_period)
     monthly_amount = div(56*24*3600, 24*object.daily_period)
@@ -229,6 +228,7 @@ defmodule CirDB do
     update(id, now(), vals)
   def update({:error, _} = error, _, _), do: error
   def update(id, ts, vals) do
+    id = to_string(id)
     object_info = object_info(id)
     timestamp = timestamp_align(ts, object_info[:daily].period)
 
@@ -252,6 +252,7 @@ defmodule CirDB do
 
   @spec object_info(id :: String.t()) :: {:error, String.t() | tuple()} | map()
   def object_info(id) do
+    id = to_string(id)
     case :dets.lookup(:metadata, id) do
       [] ->
         {:error, {"Object does not exists", -2}}
@@ -326,6 +327,7 @@ defmodule CirDB do
   # Last update timestamp
   @spec object_last_update(id::String.t()) :: timestamp::integer()
   def object_last_update(id) do
+    id = to_string(id)
     case :dets.lookup(:daily_cache, id) do
       [] -> -1
       [{_, ts, _}] -> ts
@@ -334,6 +336,7 @@ defmodule CirDB do
   
   def object_datas(:daily, id), do: object_datas(:daily_cache, id)
   def object_datas(scope, id) do
+    id = to_string(id)
     case {scope, :dets.lookup(scope, id)} do
       {:daily_cache, []} ->
         info = object_info(id)
