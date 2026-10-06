@@ -22,7 +22,7 @@ defmodule CirDB do
     IO.puts "[CirDB]: Coping config file to config/..."
     source_dir = File.cwd! <> "/config/local"
     File.cp!("#{source_dir}/config.exs", "#{dest_dir}/cir_db.exs")
-    File.cp!("#{source_dir}/../ENV.sh", "#{dest_dir}/../../CIRDB_ENV.sh")
+    File.cp!("#{source_dir}/../../ENV.sh", "#{dest_dir}/../../CIRDB_ENV.sh")
     IO.puts "[CirDB]: Copy OK, RUN again!!!!"
     System.halt()
   end
