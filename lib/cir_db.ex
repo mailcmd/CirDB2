@@ -432,11 +432,11 @@ defmodule CirDB do
         items_types =
           case parse_fetch_config(config) do
             {_, _, :daily} -> 
-              Enum.map(object_info.items, fn {type, _,min, max} ->
+              Enum.map(object_info.items, fn {type, _, max, min} ->
                 {@types[type], min, max}
               end)
             _ -> 
-              Enum.map(object_info.items, fn {_, _, min, max} ->
+              Enum.map(object_info.items, fn {_, _, max, min} ->
                 {:gauge, min, max}
               end)
           end
