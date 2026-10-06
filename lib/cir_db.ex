@@ -199,7 +199,9 @@ defmodule CirDB do
 
   # Create Object
   @spec create_object(object::object()) :: {:ok, id::String.t()} | {:error, reason::atom()}
-  def create_object(%Object{id: id} = object) when is_binary(id) do
+  def create_object(%Object{id: id} = object) when not is_binary(id), 
+    do: create_object(%{object | id: to_string(id)})
+  def create_object(%Object{id: id} = object) do
     daily_amount = div(48*3600, object.daily_period)
     weekly_amount = div(14*24*3600, 6*object.daily_period)
     monthly_amount = div(56*24*3600, 24*object.daily_period)
