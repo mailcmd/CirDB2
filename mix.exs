@@ -4,7 +4,7 @@ defmodule CirDB.MixProject do
   def project do
     [
       app: :cir_db,
-      version: "0.1.0",
+      version: "0.2.0",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       deps: get_mode() |> deps()
