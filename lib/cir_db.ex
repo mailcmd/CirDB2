@@ -441,10 +441,6 @@ defmodule CirDB do
               end)
           end
 
-
-        IO.inspect items_types
-        Enum.each(fetch_h(datas, items_types), &IO.inspect/1)
-
         result = 
           datas
           |> fetch_h(items_types)
