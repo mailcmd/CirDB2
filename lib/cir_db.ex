@@ -481,12 +481,12 @@ defmodule CirDB do
   end
 
   defp fetch_h([{_, :undefined}, {ts2, vals2} | datas], items_types) do
-    [{ts2, nil}]
+    [{ts2, Enum.map(items_types, fn _ -> nil end)}]
     ++
     fetch_h([{ts2, vals2} | datas], items_types)
   end
   defp fetch_h([{_, _}, {ts2, :undefined} | datas], items_types), do:
-    [{ts2, nil}]
+    [{ts2, Enum.map(items_types, fn _ -> nil end)}]
     ++
     fetch_h([{ts2, :undefined} | datas], items_types)
   defp fetch_h([_], _), do: []
