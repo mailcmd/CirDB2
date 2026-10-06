@@ -403,7 +403,7 @@ defmodule CirDB do
             list_start = Enum.reverse(list_start)
             list_end = Enum.reverse(list_end)
             {tss, (list_start ++ list_end)}
-          end
+          end |> IO.inspect
         
         result =
           timestamps
