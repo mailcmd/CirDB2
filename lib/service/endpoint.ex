@@ -1,4 +1,3 @@
-if CirDB.MixProject.get_mode() == :service do
 defmodule CirDB.Endpoint do
   use Plug.Router
   use Plug.ErrorHandler
@@ -78,5 +77,4 @@ defmodule CirDB.Endpoint do
       end
     Conn.send_resp(conn, conn.assigns[:status] || 200, (message || ""))
   end
-end
 end
