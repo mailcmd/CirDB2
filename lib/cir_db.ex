@@ -452,12 +452,13 @@ defmodule CirDB do
           # |> CirDB.Utils.tolerate_n_nils(@nils_tolerancy)
           # |> Enum.reverse()
 
+        Enum.each(result, &IO.inspect/1)
+
         if config.first_row_labels do
           [ {"timestamps", Enum.map(object_info.items, &(&1.label))} | result ]
         else
           result
         end
-
     end
   end
 
