@@ -447,10 +447,10 @@ defmodule CirDB do
           |> fix_missing_data(config.fix_missing_data)
           # process data
           |> fetch_h(items_types)
+          |> Enum.reverse()
           # purge last n rows if all values are nil's
-          |> Enum.reverse()
-          |> CirDB.Utils.tolerate_n_nils(@nils_tolerancy)
-          |> Enum.reverse()
+          # |> CirDB.Utils.tolerate_n_nils(@nils_tolerancy)
+          # |> Enum.reverse()
 
         if config.first_row_labels do
           [ {"timestamps", Enum.map(object_info.items, &(&1.label))} | result ]
