@@ -9,15 +9,15 @@ defmodule CirDB do
   @external_resource "CIRDB_ENV.sh"
 
   # Determine if CirDB is installed as module or as server
-  @is_server (File.cwd! |> Path.dirname() |> Path.basename()) != "deps"
+  @is_module (File.cwd! |> Path.dirname() |> Path.basename()) == "deps"
 
   # ################################
   # ## ON COMPILE CHECK CONFIG FILE
   # ################################
   dest_dir = File.cwd! <> "/../../config/local/"
   if not File.exists?(dest_dir), do: File.mkdir_p(dest_dir)
-  if not @is_server and not File.exists?("#{dest_dir}/cir_db.exs") do
-    IO.puts "[CirDB]: WARNING!!! We need to copy config.exs.example to config dir and rename it!!!!"
+  if @is_module and not File.exists?("#{dest_dir}/cir_db.exs") do
+    IO.puts "[CirDB]: WARNING!!! We need to copy config.exs to config dir and rename it!!!!"
     IO.puts "[CirDB]: Coping config file to config/..."
     source_dir = File.cwd! <> "/config"
     File.cp!("#{source_dir}/config.exs", "#{dest_dir}/cir_db.exs")
@@ -127,21 +127,19 @@ defmodule CirDB do
     ## Init Config getter
     CirDB.Config.init()
 
-    if @is_server do
-      ## Create struct and Init cache
-      if not File.exists?(CirDB.Config.get(:daily_file)) do
-        create_struct()
-      else
-        open_struct()
-      end
-
-      ## launch sync process
-      :timer.apply_after(CirDB.Config.get(:sync_every)*1000, __MODULE__, :do_sync, [])
-
-      ## launch purge process
-      :timer.apply_after(CirDB.Config.get(:purge_every)*1000, __MODULE__, :do_purge, [])
+    ## Create struct and Init cache
+    if not File.exists?(CirDB.Config.get(:daily_file)) do
+      create_struct()
+    else
+      open_struct()
     end
-    
+
+    ## launch sync process
+    :timer.apply_after(CirDB.Config.get(:sync_every)*1000, __MODULE__, :do_sync, [])
+
+    ## launch purge process
+    :timer.apply_after(CirDB.Config.get(:purge_every)*1000, __MODULE__, :do_purge, [])
+
     :ok
   end
 

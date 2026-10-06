@@ -7,7 +7,7 @@ defmodule CirDB.MixProject do
       version: "0.2.0",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
-      deps: get_mode() |> deps()
+      deps: deps()
     ]
   end
 
@@ -20,20 +20,16 @@ defmodule CirDB.MixProject do
   end
 
   # Run "mix help deps" to learn about dependencies.
-  defp deps(:service) do
+  defp deps() do
     [
       {:plug_cowboy, "~> 2.9.0"},
       {:jason, "~> 1.4.5"}
     ]
   end
-  defp deps(:client) do
-    [
-    ]
-  end
 
   def get_mode() do
     (File.cwd! |> Path.dirname() |> Path.basename()) == "deps"
-      && :client
+      && :module
       || :service
   end
 end
