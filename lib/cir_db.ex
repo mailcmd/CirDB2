@@ -378,15 +378,13 @@ defmodule CirDB do
         data = object_datas(scope, id)
         data_list = 
           if index_start < index_end do
-            list = 
-              :array.foldl(fn
-                index, item, list when index >= index_start and index <= index_end ->
-                  [item | list]
-                _, _, list ->
-                  list
-              end, [], data)
-              |> Enum.reverse()
-            {tss, list}
+            :array.foldl(fn
+              index, item, list when index >= index_start and index <= index_end ->
+                [item | list]
+              _, _, list ->
+                list
+            end, [], data)
+            |> Enum.reverse()
           else
             {list_start, list_end} =
               :array.foldl(fn
