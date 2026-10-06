@@ -291,6 +291,14 @@ defmodule CirDB do
     end
   end
 
+  @spec object_exists?(id :: String.t()) :: boolean()
+  def object_exists?(id) do
+    case object_info(id) do
+      {:error, _} -> false
+      _ -> true
+    end
+  end 
+  
   # Consolidate datas if timestamp match any scope
   def consolidate_object(object_info, timestamp) do
     Enum.each([:weekly, :monthly, :yearly], fn scope ->
