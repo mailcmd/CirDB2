@@ -5,11 +5,19 @@ defmodule CirDB.Application do
 
   @impl true
   def start(_type, _args) do
-    CirDB.init()
-    
-    children = [{Plug.Cowboy, scheme: :http, plug: CirDB.Endpoint, options: [port: port()]}]
-    opts = [strategy: :one_for_one, name: CirDB.Supervisor]
-    Supervisor.start_link(children, opts)
+    if Application.get_env(:cir_db, :config)[:enable_web_service] do 
+      CirDB.init()
+      
+      children = [{Plug.Cowboy, scheme: :http, plug: CirDB.Endpoint, options: [port: port()]}]
+      opts = [strategy: :one_for_one, name: CirDB.Supervisor]
+      Supervisor.start_link(children, opts)
+    else
+      pid = spawn_link(fn -> 
+        CirDB.init()
+        Process.sleep(:infinity)
+      end)
+      {:ok, pid}
+    end  
   end
 
   @impl true

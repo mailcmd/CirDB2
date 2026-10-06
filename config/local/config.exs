@@ -1,6 +1,7 @@
 import Config
 
 config :cir_db, config: [
+  enable_web_service: false,
   port: System.get_env("CIRDB_SERVICE_PORT", "9666") |> Integer.parse() |> elem(0),
   dir: "/var/cir_db",
   cache_dir: "/dev/shm/cir_db_chache",
