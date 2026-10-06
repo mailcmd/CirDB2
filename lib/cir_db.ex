@@ -441,6 +441,8 @@ defmodule CirDB do
               end)
           end
 
+        Enum.each(datas, &IO.inspect/1)
+
         result = 
           datas
           |> fetch_h(items_types)
@@ -451,8 +453,6 @@ defmodule CirDB do
           # purge last n rows if all values are nil's
           # |> CirDB.Utils.tolerate_n_nils(@nils_tolerancy)
           # |> Enum.reverse()
-
-        Enum.each(result, &IO.inspect/1)
 
         if config.first_row_labels do
           [ {"timestamps", Enum.map(object_info.items, &(&1.label))} | result ]
