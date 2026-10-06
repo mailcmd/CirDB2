@@ -373,11 +373,11 @@ defmodule CirDB do
         
         index_start = get_position(ts_start, object_info, scope)
         index_end = get_position(ts_end, object_info, scope)
+        timestamps = ts_start..ts_end//period |> Enum.into([])
 
         data = object_datas(scope, id)
-        {timestamps, data_list} = 
+        data_list = 
           if index_start < index_end do
-            tss = ts_start..ts_end//period |> Enum.into([])
             list = 
               :array.foldl(fn
                 index, item, list when index >= index_start and index <= index_end ->
@@ -388,9 +388,6 @@ defmodule CirDB do
               |> Enum.reverse()
             {tss, list}
           else
-            tss = 
-              Range.to_list(ts_start..(ts_start+object_info[scope].amount*period)//period) ++
-              Range.to_list((ts_end-index_end*period)..ts_end//period)
             {list_start, list_end} =
               :array.foldl(fn
                 index, item, {list1, list2} when index >= index_start ->
@@ -402,8 +399,8 @@ defmodule CirDB do
               end, {[], []}, data)
             list_start = Enum.reverse(list_start)
             list_end = Enum.reverse(list_end)
-            {tss, (list_start ++ list_end)}
-          end |> IO.inspect
+            (list_start ++ list_end)
+          end 
         
         result =
           timestamps
