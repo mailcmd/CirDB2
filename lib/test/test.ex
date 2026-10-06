@@ -29,7 +29,7 @@ defmodule CirDB.Test do
   end
 
   def put(id) do
-    vals = [ Enum.random(1..100), System.os_time(:second) ]
+    vals = [ Enum.random(1..100), 2*System.os_time(:second) ]
     ts = System.os_time(:second)
     IO.puts "#{inspect DateTime.from_unix!(ts)} (#{inspect ts}) - Upd: #{inspect vals} #{inspect update(id, vals)}"
   end

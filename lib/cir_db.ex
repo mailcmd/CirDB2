@@ -174,7 +174,7 @@ defmodule CirDB do
   # Copy complete cache to db
   @spec sync() :: :ok
   def sync() do
-    :dets.sync(:daily_cache_file)
+    :dets.sync(:daily_cache)
     File.cp!(CirDB.Config.get(:daily_cache_file), CirDB.Config.get(:daily_file), on_conflict: &overwrite_older/2)
   end
 
@@ -231,10 +231,7 @@ defmodule CirDB do
     object_info = object_info(id)
     timestamp = timestamp_align(ts, object_info[:daily].period)
 
-    case object_info do
-      {:error, _} = error ->
-        error
-
+    case object_info(id) do
       %{last_update: last_update} when last_update > timestamp ->
         {:error, "Timestamp equal or older than last_update"}
 
@@ -252,17 +249,19 @@ defmodule CirDB do
     end
   end
 
-  @spec object_info(id :: String.t()) :: object_info::map() | {:error, msg::String.t() | tuple()}
+  @spec object_info(id :: String.t()) :: {:error, String.t() | tuple()} | map()
   def object_info(id) do
     case :dets.lookup(:metadata, id) do
       [] ->
         {:error, {"Object does not exists", -2}}
+        
       [{_,
         daily_period, daily_amount,
         weekly_period, weekly_amount,
         monthly_period, monthly_amount,
         yearly_period, yearly_amount,
         items
+        
       }] ->
         %{
           id: id,
@@ -326,13 +325,20 @@ defmodule CirDB do
   
   def object_datas(:daily, id), do: object_datas(:daily_cache, id)
   def object_datas(scope, id) do
-    case :dets.lookup(scope, id) do
-      [] ->
+    case {scope, :dets.lookup(scope, id)} do
+      {:daily_cache, []} ->
         info = object_info(id)
         :array.new(info[scope].amount)
-      [{_, _, datas}] ->
+      {_, []} ->
+        info = object_info(id)
+        {
+          :array.new(info[scope].amount), 
+          :array.new(info[scope].amount), 
+          :array.new(info[scope].amount)
+        }
+      {_, [{_, _, datas}]} ->
         datas
-      [{_, _, avg_datas, max_datas, min_datas}] ->
+      {_, [{_, _, avg_datas, max_datas, min_datas}]} ->
         {avg_datas, max_datas, min_datas}
     end
   end
@@ -363,19 +369,21 @@ defmodule CirDB do
           |> Enum.zip(
             if index_start < index_end do
               :array.foldl(fn
-                (index, item, list) when index >= index_start and index <= index_end ->
+                index, item, list when index >= index_start and index <= index_end ->
                   [item | list]
-                (_, _, list) ->
+                _, _, list ->
                   list
               end, [], data)
               |> Enum.reverse()
             else
               {list_start, list_end} =
                 :array.foldl(fn
-                  (index, item, {list1, list2}) when index >= index_start ->
+                  index, item, {list1, list2} when index >= index_start ->
                     {[item | list1], list2}
-                  (index, item, {list1, list2}) when index <= index_end ->
+                  index, item, {list1, list2} when index <= index_end ->
                     {list1, [item | list2]}
+                  _, _, list ->
+                    list
                 end, {[], []}, data)
               list_start = Enum.reverse(list_start)
               list_end = Enum.reverse(list_end)
@@ -392,9 +400,6 @@ defmodule CirDB do
         else
           result
         end
-
-      _ ->
-        {:error, "Bad or missing %FechConfig{}"}
     end
   end
 
@@ -413,11 +418,18 @@ defmodule CirDB do
         # items_types will be all :gauge if scope is not :daily
         items_types =
           case parse_fetch_config(config) do
-            {_, _, :daily} -> Enum.map(object_info.items, &({@types[&1.type], &1.min, &1.max}))
-            _ -> Enum.map(object_info.items, &({:gauge, &1.min, &1.max}))
+            {_, _, :daily} -> 
+              Enum.map(object_info.items, fn {type, _,min, max} ->
+                {@types[type], min, max}
+              end)
+            _ -> 
+              Enum.map(object_info.items, fn {_, _, min, max} ->
+                {:gauge, min, max}
+              end)
           end
 
-        result = datas
+        result = 
+          datas
           # fix only one nil problem
           |> fix_missing_data(config.fix_missing_data)
           # process data
@@ -426,7 +438,6 @@ defmodule CirDB do
           |> Enum.reverse()
           |> CirDB.Utils.tolerate_n_nils(@nils_tolerancy)
           |> Enum.reverse()
-
 
         if config.first_row_labels do
           [ {"timestamps", Enum.map(object_info.items, &(&1.label))} | result ]
@@ -456,6 +467,11 @@ defmodule CirDB do
     [ d1 | fix_missing_data([d2, d3 | datas], fix) ]
   end
 
+  defp fetch_h([{_, :undefined} | datas], items_types), do:
+    fetch_h(datas, items_types)
+  defp fetch_h([{ts1, vals1}, {_, :undefined} | datas], items_types), do:
+    fetch_h([{ts1, vals1} | datas], items_types)
+  defp fetch_h([_], _), do: []
   defp fetch_h([{ts1, vals1}, {ts2, vals2}], items_types), do:
     [ {ts2, fetch_process_vals_h(vals1, vals2, ts2 - ts1, items_types)} ]
   defp fetch_h([{ts1, vals1}, {ts2, vals2} | datas], items_types) do

@@ -3,7 +3,7 @@ defmodule CirDB.Endpoint do
   use Plug.Router
   use Plug.ErrorHandler
 
-  require Logger
+  # require Logger
 
   alias Plug.Conn
 
