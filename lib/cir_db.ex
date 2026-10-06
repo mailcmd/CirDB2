@@ -483,7 +483,7 @@ defmodule CirDB do
   def fetch_h([{ts1, :undefined} | datas], items_types), 
     do: fetch_h([{ts1, Enum.map(items_types, fn _ -> nil end)} | datas], items_types)
   def fetch_h([{ts1, vals1}, {ts2, :undefined} | datas], items_types), 
-    do: fetch_h([{ts1, vals1}, {ts2, Enum.map(items_types, fn _ -> nil end)} | datas])
+    do: fetch_h([{ts1, vals1}, {ts2, Enum.map(items_types, fn _ -> nil end)} | datas], items_types)
   def fetch_h([_], _), do: []
   def fetch_h([{ts1, vals1}, {ts2, vals2}], items_types), do:
     [ {ts2, fetch_process_vals_h(vals1, vals2, ts2 - ts1, items_types)} ]
