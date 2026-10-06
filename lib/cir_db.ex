@@ -74,7 +74,7 @@ defmodule CirDB do
 
   @types %{0 => :gauge, 1 => :counter32, 2 => :counter64}
 
-  @nils_tolerancy 2
+  # @nils_tolerancy 2
 
   defmodule Object do
     defstruct [
