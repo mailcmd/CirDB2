@@ -480,16 +480,19 @@ defmodule CirDB do
     [ d1 | fix_missing_data([d2, d3 | datas], fix) ]
   end
 
-  defp fetch_h([{_, :undefined} | datas], items_types), do:
-    fetch_h(datas, items_types)
-  defp fetch_h([{ts1, vals1}, {_, :undefined} | datas], items_types), do:
-    fetch_h([{ts1, vals1} | datas], items_types)
+  defp fetch_h([{_, :undefined}, {ts2, vals2} | datas], items_types) do
+    [{ts2, nil}]
+    ++
+    fetch_h([{ts2, vals2} | datas], items_types)
+  end
+  # defp fetch_h([{ts1, vals1}, {_, :undefined} | datas], items_types), do:
+  #   fetch_h([{ts1, vals1} | datas], items_types)
   defp fetch_h([_], _), do: []
   defp fetch_h([{ts1, vals1}, {ts2, vals2}], items_types), do:
     [ {ts2, fetch_process_vals_h(vals1, vals2, ts2 - ts1, items_types)} ]
   defp fetch_h([{ts1, vals1}, {ts2, vals2} | datas], items_types) do
     processed_vals = fetch_process_vals_h(vals1, vals2, ts2 - ts1, items_types)
-    [ {ts2, processed_vals} ]
+    [{ts2, processed_vals}]
     ++
     fetch_h([{ts2, vals2} | datas], items_types)
   end
