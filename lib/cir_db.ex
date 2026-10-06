@@ -370,16 +370,15 @@ defmodule CirDB do
         period = object_info[scope].period
         ts_start = timestamp_align(ts_start, period) - period
         ts_end = timestamp_align(ts_end, period)
-        timestamps = ts_start..ts_end//period |> Enum.into([])
         
         index_start = get_position(ts_start, object_info, scope)
         index_end = get_position(ts_end, object_info, scope)
 
         data = object_datas(scope, id)
-        result =
-          timestamps 
-          |> Enum.zip(
-            if index_start < index_end do
+        {timestamps, data_list} = 
+          if index_start < index_end do
+            tss = ts_start..ts_end//period |> Enum.into([])
+            list = 
               :array.foldl(fn
                 index, item, list when index >= index_start and index <= index_end ->
                   [item | list]
@@ -387,21 +386,28 @@ defmodule CirDB do
                   list
               end, [], data)
               |> Enum.reverse()
-            else
-              {list_start, list_end} =
-                :array.foldl(fn
-                  index, item, {list1, list2} when index >= index_start ->
-                    {[item | list1], list2}
-                  index, item, {list1, list2} when index <= index_end ->
-                    {list1, [item | list2]}
-                  _, _, list ->
-                    list
-                end, {[], []}, data)
-              list_start = Enum.reverse(list_start)
-              list_end = Enum.reverse(list_end)
-              (list_start ++ list_end) 
-            end
-          )
+            {tss, list}
+          else
+            tss = 
+              Range.to_list(ts_start..(ts_start+object_info[scope].amount*period)//period) ++
+              Range.to_list((ts_end-index_end*period)..ts_end//period)
+            {list_start, list_end} =
+              :array.foldl(fn
+                index, item, {list1, list2} when index >= index_start ->
+                  {[item | list1], list2}
+                index, item, {list1, list2} when index <= index_end ->
+                  {list1, [item | list2]}
+                _, _, list ->
+                  list
+              end, {[], []}, data)
+            list_start = Enum.reverse(list_start)
+            list_end = Enum.reverse(list_end)
+            {tss, (list_start ++ list_end)}
+          end
+        
+        result =
+          timestamps
+          |> Enum.zip(data_list)
           |> Enum.map(fn {ts, vals} ->
             nts = config.time_as_string && "#{DateTime.from_unix!(ts)}" || ts
             {nts, vals}
