@@ -9,5 +9,4 @@ config :cir_db, config: [
   purge_every: 86400,         # seconds
   purge_older_than: 90*86400, # seconds
   rrdtool_binary: "/usr/bin/rrdtool"
-
 ]
