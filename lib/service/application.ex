@@ -7,7 +7,6 @@ defmodule CirDB.Application do
   def start(_type, _args) do
     if Application.get_env(:cir_db, :config)[:enable_web_service] do 
       CirDB.init()
-      
       children = [{Plug.Cowboy, scheme: :http, plug: CirDB.Endpoint, options: [port: port()]}]
       opts = [strategy: :one_for_one, name: CirDB.Supervisor]
       Supervisor.start_link(children, opts)
