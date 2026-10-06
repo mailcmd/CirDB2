@@ -480,19 +480,13 @@ defmodule CirDB do
     [ d1 | fix_missing_data([d2, d3 | datas], fix) ]
   end
 
-  defp fetch_h([{_, :undefined}, {ts2, vals2} | datas], items_types) do
-    [{ts2, Enum.map(items_types, fn _ -> nil end)}]
-    ++
-    fetch_h([{ts2, vals2} | datas], items_types)
+  def fetch_h([{ts1, :undefined} | datas], items_types) do
+    fetch_h([{ts1, Enum.map(items_types, fn _ -> nil end)} | datas], items_types)
   end
-  defp fetch_h([{_, _}, {ts2, :undefined} | datas], items_types), do:
-    [{ts2, Enum.map(items_types, fn _ -> nil end)}]
-    ++
-    fetch_h([{ts2, :undefined} | datas], items_types)
-  defp fetch_h([_], _), do: []
-  defp fetch_h([{ts1, vals1}, {ts2, vals2}], items_types), do:
+  def fetch_h([_], _), do: []
+  def fetch_h([{ts1, vals1}, {ts2, vals2}], items_types), do:
     [ {ts2, fetch_process_vals_h(vals1, vals2, ts2 - ts1, items_types)} ]
-  defp fetch_h([{ts1, vals1}, {ts2, vals2} | datas], items_types) do
+  def fetch_h([{ts1, vals1}, {ts2, vals2} | datas], items_types) do
     processed_vals = fetch_process_vals_h(vals1, vals2, ts2 - ts1, items_types)
     [{ts2, processed_vals}]
     ++
