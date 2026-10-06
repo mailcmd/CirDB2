@@ -1,6 +1,7 @@
 import Config
 
 config :cir_db, config: [
+  force_service: false,
   dir: "/tmp/cir_db",
   cache_dir: "/dev/shm/cir_db_chache",
   time_offset: -10800,
