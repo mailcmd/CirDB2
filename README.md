@@ -1,31 +1,10 @@
 # CirDB
 
-CirDB (Circular Database) es un paquete que tiene una doble función, puede usarse como módulo en
-otro proyecto Elixir o en modo standalone (service) como servidor de DB. 
+Circular DB is a timeseries DB at style of RRD but obtimized for high performance and
+a minor resource consume. It has multithreading write and cached more used data for better
+performance in read and write datas.
 
-## Como módulo
-En este modo permite crear/actualizar/obterner objetos o datos de una DB. Se puede comunicar con 3 
-tipos de DB: 
-  - CirDB Local: la DB se encuentra en el mismo host donde está corriendo el módulo.
-  - CirDB Remoto: la DB se encuentra en un host diferente al host donde está corriendo el módulo.
-  - RRD Local: Esta es una interface que permite sólo obtener (no actualizar ni crear) datos desde
-    un archivo RRD local.
-  - RRD Remoto: (QUIZÁ EN EL FUTURO)
-
-## Como servicio
-En este modo, al iniciarse el servicio, si no existe la estructura será creada. Además lanzará 2 
-tareas en el background para copiar desde el cache a la DB las novedades y para purgar archivos 
-basura que vayan quedando durante su funcionamiento. 
-
-
-# TODO
-- [x] Consolidated process
-- [x] Purge process (purge empty dirs and old files)
-- [x] Sync to disk process
-- [ ] Config set max scope
-- [ ] Object set max scope
-- [ ] Compress consolidated datas?
-
+CirDB allow to enable a web service to get and put datas remotely inside the DB. 
 
 # Initial idea
 
