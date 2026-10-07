@@ -455,7 +455,7 @@ defmodule CirDB do
         result = 
           case result do
             [{ts, datas} | _] when now - ts <= period ->
-              if Enum.all?(datas, %is_nil/1) do
+              if Enum.all?(datas, &is_nil/1) do
                 tl(result)
               else
                 result
