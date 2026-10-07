@@ -20,9 +20,8 @@ defmodule CirDB do
   if @is_module and not File.exists?("#{dest_dir}/cir_db.exs") do
     IO.puts "[CirDB]: WARNING!!! We need to copy config.exs to config dir and rename it!!!!"
     IO.puts "[CirDB]: Coping config file to config/..."
-    source_dir = File.cwd! <> "/config/local"
+    source_dir = File.cwd! <> "/config"
     File.cp!("#{source_dir}/config.exs", "#{dest_dir}/cir_db.exs")
-    File.cp!("#{source_dir}/../../ENV.sh", "#{dest_dir}/../../CIRDB_ENV.sh")
     IO.puts "[CirDB]: Copy OK, RUN again!!!!"
     System.halt()
   end
