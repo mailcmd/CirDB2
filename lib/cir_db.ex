@@ -428,8 +428,9 @@ defmodule CirDB do
       datas ->
         object_info = object_info(id)
         # items_types will be all :gauge if scope is not :daily
+        parsed_config = parse_fetch_config(config)
         items_types =
-          case parse_fetch_config(config) do
+          case parsed_config do
             {_, _, :daily} -> 
               Enum.map(object_info.items, fn {type, _, max, min} ->
                 {@types[type], min, max}
@@ -445,12 +446,25 @@ defmodule CirDB do
           |> fetch_h(items_types)
           # fix only one nil problem
           |> fix_missing_data(config.fix_missing_data)
-          # process data
-          # |> Enum.reverse()
-          # purge last n rows if all values are nil's
-          # |> CirDB.Utils.tolerate_n_nils(@nils_tolerancy)
-          # |> Enum.reverse()
-
+          |> Enum.reverse()
+          
+        now = now()
+        {_, _, scope} = parsed_config
+        period = object_info[scope].period
+        
+        result = 
+          case result do
+            [{ts, datas} | _] when now - ts <= period ->
+              if Enum.all?(datas, %is_nil/1) do
+                tl(result)
+              else
+                result
+              end
+            _ -> 
+              result
+          end
+          |> Enum.reverse()
+          
         if config.first_row_labels do
           [ {"timestamps", Enum.map(object_info.items, &(&1.label))} | result ]
         else
