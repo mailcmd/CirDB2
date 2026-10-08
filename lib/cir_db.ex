@@ -117,6 +117,11 @@ defmodule CirDB do
   @type fetch_config() :: %FetchConfig{}
 
 
+  @aggs %{
+    avg: 0,
+    max: 1,
+    min: 2
+  }
 
   ################################################################################################
   ## DB Management
@@ -374,7 +379,14 @@ defmodule CirDB do
         index_end = get_position(ts_end, object_info, scope)
         timestamps = ts_start..ts_end//period |> Enum.into([])
 
-        data = object_datas(scope, id)
+        data = 
+          case object_datas(scope, id) do 
+            {_, _, _} = datas -> 
+              elem(datas, @aggs[config.aggregate])
+            datas -> 
+              datas
+          end 
+          
         data_list = 
           if index_start < index_end do
             :array.foldl(fn
